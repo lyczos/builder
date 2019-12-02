@@ -46,5 +46,9 @@
     "node-fetch": "^2.2.0",
     "tslib": "^1.10.0"
   },
+  "browser": {
+    "http": false,
+    "https": false
+  },
   "gitHead": "f233cba190317de3644fff198e765660205cd7f1"
 }
