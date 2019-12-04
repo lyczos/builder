@@ -19,7 +19,7 @@ const components = [BuilderContentComponent, BuilderBlocksComponent, BuilderComp
   providers: [BuilderService, BuilderContentService, BuilderComponentService],
   declarations: [components, directives],
   exports: [components, directives],
-  entryComponents: [components],
+  entryComponents: [components]
 })
 export class BuilderModule {
   constructor(injector: Injector) {

@@ -16,7 +16,7 @@ import { GetContentOptions } from '@builder.io/sdk';
   selector: 'custom-thing',
   template: 'Hello: {{name}}',
 })
-export class CustomThing {
+export class CustomThingComponent {
   @Input()
   name = '';
 }

@@ -1,5 +1,6 @@
 import {
   Component,
+  Inject,
   Input,
   Output,
   EventEmitter,
@@ -15,6 +16,7 @@ import { BuilderComponentService } from './builder-component.service';
 import { GetContentOptions, Builder } from '@builder.io/sdk';
 import { Subscription } from 'rxjs';
 import { BuilderService } from '../../services/builder.service';
+import { DOCUMENT } from '@angular/common';
 
 function omit<T extends object>(obj: T, ...values: (keyof T)[]): Partial<T> {
   const newObject = Object.assign({}, obj);
@@ -80,12 +82,16 @@ export class BuilderComponentComponent implements OnDestroy {
 
   subscriptions = new Subscription();
 
+  private _document: Document;
+
   constructor(
     private viewContainer: ViewContainerRef,
     private elementRef: ElementRef,
     private builderService: BuilderService,
-    @Optional() private router?: Router
+    @Optional() private router?: Router,
+    @Inject(DOCUMENT) document?: any
   ) {
+    this._document = document as Document;
     // if (this.router && this.reloadOnRoute) {
     //   // TODO: should the inner function return reloadOnRoute?
     //   this.router.routeReuseStrategy.shouldReuseRoute = () => false;
@@ -155,21 +161,21 @@ export class BuilderComponentComponent implements OnDestroy {
 
   async ensureWCScriptLoaded() {
     const SCRIPT_ID = 'builder-wc-script';
-    if (!Builder.isBrowser || wcScriptInserted || document.getElementById(SCRIPT_ID)) {
+    if (!Builder.isBrowser || wcScriptInserted || this._document.getElementById(SCRIPT_ID)) {
       return;
     }
     function getQueryParam(url: string, variable: string) {
-      var query = url.split('?')[1] || '';
-      var vars = query.split('&');
+      const query = url.split('?')[1] || '';
+      const vars = query.split('&');
       for (let i = 0; i < vars.length; i++) {
-        var pair = vars[i].split('=');
+        const pair = vars[i].split('=');
         if (decodeURIComponent(pair[0]) === variable) {
           return decodeURIComponent(pair[1]);
         }
       }
       return null;
     }
-    const script = document.createElement('script');
+    const script = this._document.createElement('script');
     script.id = SCRIPT_ID;
     // TODO: detect builder.wcVersion and if customEleemnts exists and do
     // dynamic versions and lite here
@@ -179,7 +185,7 @@ export class BuilderComponentComponent implements OnDestroy {
     return new Promise((resolve, reject) => {
       script.addEventListener('load', resolve);
       script.addEventListener('error', e => reject(e.error));
-      document.head.appendChild(script);
+      this._document.head.appendChild(script);
     });
   }
 

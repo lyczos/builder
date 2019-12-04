@@ -1,21 +1,25 @@
 import {
   Directive,
   EmbeddedViewRef,
+  Inject,
   Input,
   Optional,
-  Renderer,
+  Renderer2,
   TemplateRef,
   ViewContainerRef,
   OnInit,
-  OnDestroy,
+  OnDestroy
 } from '@angular/core';
 import { makeStateKey, StateKey, TransferState } from '@angular/platform-browser';
+import { Router, NavigationEnd } from '@angular/router';
+import { DOCUMENT } from '@angular/common';
+
 import { BuilderContentService } from '../services/builder-content.service';
 // FIXME: tsconfig paths? install module? use lerna...
 import { BuilderService } from '../services/builder.service';
 import { Builder, Subscription as BuilderSubscription } from '@builder.io/sdk';
 import { BuilderComponentService } from '../components/builder-component/builder-component.service';
-import { Router, NavigationEnd, NavigationStart } from '@angular/router';
+
 import { Subscription } from 'rxjs';
 // TODO: below is optional... they can import if needed
 // import '@builder.io/widgets'
@@ -50,19 +54,24 @@ export class BuilderContentDirective implements OnInit, OnDestroy {
 
   private clickTracked = false;
 
+  private rootNodeClickListener: (() => void) | undefined;
+  private _document: Document;
+
   hydrated = false;
 
   constructor(
     private _viewContainer: ViewContainerRef,
-    private renderer: Renderer,
+    private renderer2: Renderer2,
     private builder: BuilderService,
     private builderComponentService: BuilderComponentService,
     @Optional() private transferState: TransferState,
     templateRef: TemplateRef<BuilderContentContext>,
-    @Optional() private router?: Router
+    @Optional() private router?: Router,
+    @Inject(DOCUMENT) document?: any
   ) {
     builderComponentService.contentDirectiveInstance = this;
     this._templateRef = templateRef;
+    this._document = document as Document;
   }
 
   // TODO: pass this option down from builder-component
@@ -118,6 +127,10 @@ export class BuilderContentDirective implements OnInit, OnDestroy {
     if (this.contentSubscription) {
       this.contentSubscription.unsubscribe();
     }
+    // Remove listener
+    if (this.rootNodeClickListener) {
+      this.rootNodeClickListener();
+    }
   }
 
   // TODO: have another option for this or get from metadata
@@ -143,7 +156,7 @@ export class BuilderContentDirective implements OnInit, OnDestroy {
 
     // TODO: only in editor mode
     // TODO: put messaging on builder class
-    if (document.body.classList.contains('builder-editing')) {
+    if (this._document.body.classList.contains('builder-editing')) {
       if (this.matchId) {
         // TODO: get event object and pass mouse coordinages
         window.parent.postMessage(
@@ -186,9 +199,9 @@ export class BuilderContentDirective implements OnInit, OnDestroy {
     this.stateKey = makeStateKey(this.stateKeyString);
     // this.request();
     const rootNode = this._viewRef!.rootNodes[0];
-    this.renderer.setElementAttribute(rootNode, 'builder-model', model);
-    this.renderer.setElementAttribute(rootNode, 'builder-model-name', model.replace(/-/g, ' '));
-    this.renderer.listen(rootNode, 'click', (event: MouseEvent) => this.onClick(event));
+    this.renderer2.setAttribute(rootNode, 'builder-model', model);
+    this.renderer2.setAttribute(rootNode, 'builder-model-name', model.replace(/-/g, ' '));
+    this.rootNodeClickListener = this.renderer2.listen(rootNode, 'click', (event: MouseEvent) => this.onClick(event));
   }
 
   private get url() {
@@ -362,7 +375,7 @@ export class BuilderContentDirective implements OnInit, OnDestroy {
           if (match) {
             const rootNode = this._viewRef!.rootNodes[0];
             this.matchId = match.id;
-            this.renderer.setElementAttribute(rootNode, 'builder-content-entry-id', match.id);
+            this.renderer2.setAttribute(rootNode, 'builder-content-entry-id', match.id);
             this.match = match;
             viewRef.context.$implicit = match.data;
             // viewRef.context.results = result.map(item => ({ ...item.data, $id: item.id }));
