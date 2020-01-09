@@ -147,7 +147,6 @@ export interface GetContentOptions {
   offset?: number;
   initialContent?: any;
   model?: string;
-  // TODO: more caching options like max age etc
   cache?: boolean;
   preview?: boolean;
   entry?: string;
@@ -1433,6 +1432,14 @@ export class Builder {
       for (const options of queue) {
         if (options.format) {
           queryParams.format = options.format;
+        }
+        // TODO: remove me and make permodel
+        if (options.static) {
+          queryParams.static = options.static;
+        }
+
+        if (options.cachebust) {
+          queryParams.cachebust = options.cachebust;
         }
 
         if (typeof options.cacheSeconds === 'number') {

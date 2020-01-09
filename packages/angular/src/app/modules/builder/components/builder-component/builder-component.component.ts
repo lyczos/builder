@@ -13,7 +13,7 @@ import { Router, NavigationEnd } from '@angular/router';
 import { parse } from 'url';
 import { BuilderComponentService } from './builder-component.service';
 import { GetContentOptions, Builder } from '@builder.io/sdk';
-import { Subscription } from 'rxjs';
+import { Subscription, BehaviorSubject } from 'rxjs';
 import { BuilderService } from '../../services/builder.service';
 
 function omit<T extends object>(obj: T, ...values: (keyof T)[]): Partial<T> {
@@ -80,41 +80,40 @@ export class BuilderComponentComponent implements OnDestroy {
 
   subscriptions = new Subscription();
 
+  visible = new BehaviorSubject(true);
+
+  private get url() {
+    const location = this.builderService.getLocation();
+    return location.pathname || ''; 
+  }
+
+  get key() {
+    const key = Builder.isEditing || !this.reloadOnRoute ? this.model : `${this.model}:${this.url}`;
+    return key;
+  }
+
   constructor(
     private viewContainer: ViewContainerRef,
     private elementRef: ElementRef,
     private builderService: BuilderService,
     @Optional() private router?: Router
   ) {
-    // if (this.router && this.reloadOnRoute) {
-    //   // TODO: should the inner function return reloadOnRoute?
-    //   this.router.routeReuseStrategy.shouldReuseRoute = () => false;
-    // }
+    if (this.router && this.reloadOnRoute) {
+      // TODO: should the inner function return reloadOnRoute?
+      this.router.routeReuseStrategy.shouldReuseRoute = () => false;
+    }
 
     if (Builder.isBrowser) {
       if (this.router) {
         this.subscriptions.add(
           this.router.events.subscribe(event => {
-            // TODO: this doesn't trigger
             if (event instanceof NavigationEnd) {
-              const { BuilderWC } = window as any;
-              if (BuilderWC && this.reloadOnRoute && wcScriptInserted && this.hydrate) {
-                if (
-                  this.elementRef &&
-                  this.elementRef.nativeElement &&
-                  this.elementRef.nativeElement.getContent
-                ) {
-                  BuilderWC.builder.setUserAttributes(
-                    omit(this.builderService.getUserAttributes(), 'urlPath')
-                  );
-                  // TODO: set other options based on inputs to this - options and and data
-                  this.elementRef.nativeElement.setAttribute('name', this.model);
-                  this.elementRef.nativeElement.setAttribute(
-                    'key',
-                    this.model + ':' + builderService.getUserAttributes().urlPath
-                  );
-                  this.elementRef.nativeElement.getContent(true);
-                }
+              if (this.reloadOnRoute) {
+                // Force reload component
+                this.visible.next(false);
+                Builder.nextTick(() => {
+                  this.visible.next(true);
+                });
               }
             }
           })
@@ -122,19 +121,10 @@ export class BuilderComponentComponent implements OnDestroy {
       }
       this.subscriptions.add(
         this.load.subscribe(async (value: any) => {
-          // Maybe move into builder contnet directive
-          if (value && value.data && this.hydrate !== false) {
-            this.viewContainer.detach();
-            if (this.reloadOnRoute) {
-              this.elementRef.nativeElement.setAttribute(
-                'key',
-                this.model + ':' + builderService.getUserAttributes().urlPath
-              );
-            }
-
-            // TODO: load webcompoennts JS if not already
-            // Forward user attributes and API key to WC Builder
-            // (and listen on changes to attributes to edit)
+          // TODO: this may run constantly when editing - check on this, not
+          // end of world but not ideal for perf
+          this.viewContainer.detach();
+          if (Builder.isEditing || (value && value.data && this.hydrate !== false)) {
             await this.ensureWCScriptLoaded();
             const { onBuilderWcLoad } = window as any;
             if (onBuilderWcLoad) {
@@ -170,10 +160,13 @@ export class BuilderComponentComponent implements OnDestroy {
       return null;
     }
     const script = document.createElement('script');
+
+    const wcVersion = getQueryParam(location.href, 'builder.wcVersion');
     script.id = SCRIPT_ID;
     // TODO: detect builder.wcVersion and if customEleemnts exists and do
     // dynamic versions and lite here
-    script.src = 'https://cdn.builder.io/js/webcomponents/dist/system/angular/builder-webcomponents.js';
+    script.src = `https://cdn.builder.io/js/webcomponents@${wcVersion ||
+      'latest'}/dist/system/angular/builder-webcomponents-async.js`;
     script.async = true;
     wcScriptInserted = true;
     return new Promise((resolve, reject) => {

@@ -14,6 +14,8 @@ import { BuilderStoreContext } from '../store/builder-store'
 import hash from 'hash-sum'
 import onChange from 'lib/on-change.js'
 
+export { onChange }
+
 import { sizes } from '../constants/device-sizes.constant'
 import {
   BuilderAsyncRequestsContext,
@@ -28,6 +30,20 @@ import { safeDynamicRequire } from 'src/functions/safe-dynamic-require'
 import { BuilderMetaContext } from 'src/store/builder-meta'
 
 const size = (thing: object) => Object.keys(thing).length
+
+function debounce(func: Function, wait: number, immediate = false) {
+  let timeout: any
+  return function(this: any) {
+    const context = this
+    const args = arguments
+    clearTimeout(timeout)
+    timeout = setTimeout(function() {
+      timeout = null
+      if (!immediate) func.apply(context, args)
+    }, wait)
+    if (immediate && !timeout) func.apply(context, args)
+  }
+}
 
 const fontsLoaded = new Set()
 
@@ -100,10 +116,12 @@ export interface BuilderPageProps {
   hydrate?: boolean
 }
 
-interface BuilderPageState {
+export interface BuilderPageState {
   state: any
   update: (state: any) => any
   updates: number
+  context: any
+  key: number
 }
 
 const tryEval = (str?: string, data: any = {}, errors?: Error[]): any => {
@@ -236,7 +254,7 @@ export class BuilderPage extends React.Component<
   private _logs?: string[]
 
   get element() {
-    return this.ref;
+    return this.ref
   }
 
   constructor(props: BuilderPageProps) {
@@ -246,6 +264,7 @@ export class BuilderPage extends React.Component<
     // this.asServer = Boolean(props.hydrate && Builder.isBrowser)
 
     this.state = {
+      context: {},
       state: Object.assign(this.rootState, {
         ...(this.props.content &&
           this.props.content.data &&
@@ -261,6 +280,7 @@ export class BuilderPage extends React.Component<
         ...props.data
       }),
       updates: 0,
+      key: 0,
       update: this.updateState
     }
 
@@ -286,11 +306,11 @@ export class BuilderPage extends React.Component<
     const script =
       id &&
       Builder.isBrowser &&
-      (document.querySelector(
+      document.querySelector(
         `script[data-builder-json="${id}"],script[data-builder-state="${id}"]`
-      ) as HTMLElement | null)
+      )
     if (script) {
-      const json = JSON.parse(script.innerText)
+      const json = JSON.parse((script as HTMLElement).innerText)
       return json
     }
     return {}
@@ -365,30 +385,29 @@ export class BuilderPage extends React.Component<
     }
   }
 
-  resizeListener = throttle(
-    () => {
-      const deviceSize = this.deviceSizeState
-      if (deviceSize !== this.state.state.deviceSize) {
-        this.setState({
-          ...this.state,
-          updates: ((this.state && this.state.updates) || 0) + 1,
-          state: Object.assign(this.rootState, {
-            ...this.state.state,
-            deviceSize
-          })
+  resizeFn = () => {
+    const deviceSize = this.deviceSizeState
+    if (deviceSize !== this.state.state.deviceSize) {
+      this.setState({
+        ...this.state,
+        updates: ((this.state && this.state.updates) || 0) + 1,
+        state: Object.assign(this.rootState, {
+          ...this.state.state,
+          deviceSize
         })
-      }
-    },
-    200,
-    { leading: false, trailing: true }
-  )
+      })
+    }
+  }
 
-  // TODO: different options per device size...........................
+  resizeListener = Builder.isEditing
+    ? throttle(this.resizeFn, 200)
+    : debounce(this.resizeFn, 400)
 
   static renderInto(
     elementOrSelector: string | HTMLElement,
     props: BuilderPageProps = {},
-    hydrate = true
+    hydrate = true,
+    fresh = false
   ) {
     console.debug(
       'BuilderPage.renderInto',
@@ -406,7 +425,8 @@ export class BuilderPage extends React.Component<
       return
     }
 
-    if (element.classList.contains('builder-hydrated')) {
+    const exists = element.classList.contains('builder-hydrated')
+    if (exists && !fresh) {
       console.debug('Tried to hydrate multiple times')
       return
     }
@@ -459,9 +479,14 @@ export class BuilderPage extends React.Component<
     if (location.search.includes('builder.debug=true')) {
       console.debug('hydrate', shouldHydrate, element)
     }
-    const div = document.createElement('div')
-    element.insertAdjacentElement('beforebegin', div)
-    div.appendChild(element)
+
+    let useEl = element
+    if (!exists) {
+      const div = document.createElement('div')
+      element.insertAdjacentElement('beforebegin', div)
+      div.appendChild(element)
+      useEl = div
+    }
 
     if (
       Builder.isEditing ||
@@ -470,9 +495,22 @@ export class BuilderPage extends React.Component<
       shouldHydrate = false
     }
     if (shouldHydrate && element) {
-      return ReactDOM.render(<BuilderPage {...props} />, div)
+      // TODO: maybe hydrate again. Maybe...
+      const val = ReactDOM.render(
+        <BuilderPage {...props} />,
+        useEl,
+        (useEl as any).builderRootRef
+      )
+      ;(useEl as any).builderRootRef = val
+      return val
     }
-    return ReactDOM.render(<BuilderPage {...props} />, div)
+    const val = ReactDOM.render(
+      <BuilderPage {...props} />,
+      useEl,
+      (useEl as any).builderRootRef
+    )
+    ;(useEl as any).builderRootRef = val
+    return val
   }
 
   mounted = false
@@ -526,6 +564,7 @@ export class BuilderPage extends React.Component<
       })
     } else {
       this.state = {
+        ...this.state,
         update: this.updateState,
         state,
         updates: ((this.state && this.state.updates) || 0) + 1
@@ -694,6 +733,12 @@ export class BuilderPage extends React.Component<
     }
   }
 
+  reload() {
+    this.setState({
+      key: this.state.key + 1
+    })
+  }
+
   render() {
     let { content } = this.props
     if (content && content.content) {
@@ -718,6 +763,7 @@ export class BuilderPage extends React.Component<
       <WrapComponent
         className="builder-component"
         data-name={this.name}
+        key={this.state.key}
         ref={ref => (this.ref = ref)}
       >
         <BuilderMetaContext.Consumer>
@@ -960,10 +1006,7 @@ export class BuilderPage extends React.Component<
             document.head.appendChild(descriptionTag)
           }
 
-          descriptionTag!.setAttribute(
-            'content',
-            description || pageDescription
-          )
+          descriptionTag.setAttribute('content', description || pageDescription)
         }
       }
     }
@@ -1046,8 +1089,18 @@ export class BuilderPage extends React.Component<
             'element',
             'Builder',
             'builder',
+            'context',
             data.jsCode
-          )(data, this, state, this.state.update, this.ref, Builder, builder)
+          )(
+            data,
+            this,
+            state,
+            this.state.update,
+            this.ref,
+            Builder,
+            builder,
+            this.state.context
+          )
 
           // TODO: allow exports = { } syntax?
           // TODO: do something with reuslt like view - methods, computed, actions, properties, template, etc etc

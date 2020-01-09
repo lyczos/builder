@@ -1,15 +1,15 @@
 /** @jsx jsx */
-import { css, jsx, ClassNames } from '@emotion/core'
-
+import { Builder, builder, BuilderElement, Component } from '@builder.io/sdk'
+import { ClassNames, jsx } from '@emotion/core'
 import React from 'react'
-import { Builder, Component, BuilderElement, builder } from '@builder.io/sdk'
-import { sizeNames, Size, sizes } from '../constants/device-sizes.constant'
-import { BuilderStoreContext } from '../store/builder-store'
-import { BuilderAsyncRequestsContext, RequestOrPromise } from '../store/builder-async-requests'
-import { stringToFunction, api } from '../functions/string-to-function'
+import { Size, sizeNames, sizes } from '../constants/device-sizes.constant'
 import { set } from '../functions/set'
-import { InsertSpacer } from './insert-spacer.component'
-import { updateQueryParam } from 'src/blocks/Image'
+import { api, stringToFunction } from '../functions/string-to-function'
+import {
+  BuilderAsyncRequestsContext,
+  RequestOrPromise
+} from '../store/builder-async-requests'
+import { BuilderStoreContext } from '../store/builder-store'
 
 const camelCaseToKebabCase = (str?: string) =>
   str ? str.replace(/([A-Z])/g, g => `-${g[0].toLowerCase()}`) : ''
@@ -48,7 +48,7 @@ const last = <T extends any>(arr: T[]) => arr[arr.length - 1]
 function omit(obj: any, values: string[]) {
   const newObject = Object.assign({}, obj)
   for (const key of values) {
-    delete (newObject as any)[key]
+    delete (newObject)[key]
   }
   return newObject
 }
@@ -85,7 +85,8 @@ function mapToCss(map: StringMap, spaces = 2, important = false) {
     return (
       memo +
       (value && value.trim()
-        ? `\n${' '.repeat(spaces)}${cssCase(key)}: ${value + (important ? ' !important' : '')};`
+        ? `\n${' '.repeat(spaces)}${cssCase(key)}: ${value +
+            (important ? ' !important' : '')};`
         : '')
     )
   }, '')
@@ -110,24 +111,42 @@ function capitalize(str: string) {
   return str[0].toUpperCase() + str.slice(1)
 }
 
-interface BuilderBlocksState {
+interface BuilderBlockState {
   state: any
   rootState: any
+  context: any
   update: Function
 }
 
-export class BuilderBlock extends React.Component<BuilderBlockProps> {
+export class BuilderBlock extends React.Component<
+  BuilderBlockProps,
+  { hasError: boolean }
+> {
   private ref: any
   private _asyncRequests?: RequestOrPromise[]
   private _errors?: Error[]
   private _logs?: string[]
+  innerComponentRef: any
 
-  private privateState: BuilderBlocksState = {
+  state = {
+    hasError: false
+  }
+
+  private privateState: BuilderBlockState = {
     state: {},
     rootState: {},
+    context: {},
     update: () => {
       /* Intentionally empty */
     }
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error('Builder block error:', error, errorInfo)
   }
 
   // TODO: handle adding return if none provided
@@ -215,18 +234,23 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
           const outer = this.props.emailMode && pick(map, emailOuterSizes)
           // TODO: this will not work as expected for a couple things that are handled specially,
           // e.g. width
-          css += `\n@media only screen and (max-width: ${sizes[size].max}px) { \n${
-            this.props.emailMode ? '.' : '.builder-block.'
-          }${self.id + (this.props.emailMode ? '-subject' : '')} {${mapToCss(
+          css += `\n@media only screen and (max-width: ${
+            sizes[size].max
+          }px) { \n${this.props.emailMode ? '.' : '.builder-block.'}${self.id +
+            (this.props.emailMode ? '-subject' : '')} {${mapToCss(
             this.props.emailMode ? omit(map, emailOuterSizes) : (map as any),
             4,
             this.props.emailMode
           )} } }`
 
           if (this.props.emailMode && outer && Object.keys(outer).length) {
-            css += `\n@media only screen and (max-width: ${sizes[size].max}px) { \n.builder-block.${
-              self.id
-            } {${mapToCss(outer as any, 4, true)} } }`
+            css += `\n@media only screen and (max-width: ${
+              sizes[size].max
+            }px) { \n.builder-block.${self.id} {${mapToCss(
+              outer as any,
+              4,
+              true
+            )} } }`
           }
         }
       }
@@ -240,7 +264,11 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
         if (firstStep) {
           const firstStepStyles = firstStep.styles
           if (firstStepStyles) {
-            css += `\n.builder-block.${self.id} {${mapToCss(firstStep, 2, true)}}`
+            css += `\n.builder-block.${self.id} {${mapToCss(
+              firstStep,
+              2,
+              true
+            )}}`
           }
         }
       }
@@ -249,9 +277,80 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
     return css
   }
 
+  eval(str: string) {
+    const fn = this.stringToFunction(str)
+    // TODO: only one root instance of this, don't rewrap every time...
+    return fn(
+      this.privateState.state,
+      undefined,
+      this.props.block,
+      builder,
+      Device,
+      this.privateState.update,
+      Builder,
+      this.privateState.context
+    )
+  }
+
+  componentWillUnmount() {
+    if (Builder.isEditing) {
+      removeEventListener('message', this.onWindowMessage)
+    }
+  }
+
+  onWindowMessage = (event: MessageEvent) => {
+    const message = event.data
+    if (!message) {
+      return
+    }
+    switch (message.type) {
+      case 'builder.selectionChange': {
+        const { data } = message
+        if (!data) {
+          break
+        }
+        const { selection } = data
+        const id = this.props.block && this.props.block.id
+        if (id && Array.isArray(selection) && selection.includes(id)) {
+          setTimeout(() => {
+            ;(window as any).$block = this
+            if (!(window as any).$blocks) {
+              ;(window as any).$blocks = []
+            }
+            ;(window as any).$blocks.push(this)
+          })
+        }
+        break
+      }
+    }
+  }
+
+  lastAttrs: any;
+
+  updateAttrs(attrs: { [key: string]: string }) {
+    // TODO: comb over lastAttrs and remove any that were there but are not now
+    const ref = this.ref
+    if (ref && ref instanceof Element) {
+      for (const attr in attrs) {
+        const value = attrs[attr]
+        if (typeof value === 'string') {
+          if (ref.getAttribute(attr) !== value) {
+            ref.setAttribute(attr, value)
+          }
+        } else if (ref.hasAttribute(attr)) {
+          ref.removeAttribute(attr)
+        } 
+      }
+    }
+  }
+
   componentDidMount() {
     const { block } = this.props
     const animations = block && block.animations
+
+    if (Builder.isEditing) {
+      addEventListener('message', this.onWindowMessage)
+    }
 
     // tslint:disable-next-line:comment-format
     ///REACT15ONLY if (this.ref) { this.ref.setAttribute('builder-id', block.id); }
@@ -273,7 +372,16 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
               set(
                 options,
                 key,
-                value(this.privateState.state, null, block, builder, null, null, Builder)
+                value(
+                  this.privateState.state,
+                  null,
+                  block,
+                  builder,
+                  null,
+                  null,
+                  Builder,
+                  this.privateState.context
+                )
               )
             }
           }
@@ -295,13 +403,15 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
 
     let InnerComponent: any
     const componentName =
-      block.component && (block.component.name || (block.component as any).component)
+      block.component &&
+      (block.component.name || (block.component as any).component)
     let componentInfo: Component | null = null
     if (block.component && !(block.component as any).class) {
       if (block.component && block.component.tag) {
         InnerComponent = block.component.tag
       } else {
-        componentInfo = Builder.components.find(item => item.name === componentName) || null
+        componentInfo =
+          Builder.components.find(item => item.name === componentName) || null
         if (componentInfo && componentInfo.class) {
           InnerComponent = componentInfo.class
         } else if (componentInfo && componentInfo.tag) {
@@ -315,7 +425,8 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
     const isBlock = !['absolute', 'fixed'].includes(
       block.responsiveStyles &&
         block.responsiveStyles.large &&
-        (block.responsiveStyles.large.position as any) /*( this.styles.position */
+        (block.responsiveStyles.large
+          .position as any) /*( this.styles.position */
     )
 
     let options: any = {
@@ -340,7 +451,20 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
       for (const key in block.bindings) {
         const value = this.stringToFunction(block.bindings[key])
         // TODO: pass block, etc
-        set(options, key, value(state, null, block, api(state), Device, null, Builder))
+        set(
+          options,
+          key,
+          value(
+            state,
+            null,
+            block,
+            api(state),
+            Device,
+            null,
+            Builder,
+            this.privateState.context
+          )
+        )
       }
     }
 
@@ -348,7 +472,10 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
       return null
     }
     // TODO: UI for this
-    if (('show' in options || (block.bindings && block.bindings.show)) && !options.show) {
+    if (
+      ('show' in options || (block.bindings && block.bindings.show)) &&
+      !options.show
+    ) {
       return null
     }
 
@@ -375,7 +502,8 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
             api(useState),
             Device,
             this.privateState.update,
-            Builder
+            Builder,
+            this.privateState.context
           )
         }
       }
@@ -388,18 +516,23 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
 
     const isVoid = voidElements.has(TagName)
 
-    const noWrap = componentInfo && (componentInfo.fragment || componentInfo.noWrap)
+    const noWrap =
+      componentInfo && (componentInfo.fragment || componentInfo.noWrap)
 
     const finalOptions: { [key: string]: string } = {
-      ...omit(options, ['class', 'component']),
+      ...omit(options, ['class', 'component', 'attr']),
       [commonTags.has(TagName) ? 'className' : 'class']:
         `builder-block ${this.id}${block.class ? ` ${block.class}` : ''}${
-          block.component && !['Image', 'Video', 'Banner'].includes(componentName)
+          block.component &&
+          !['Image', 'Video', 'Banner'].includes(componentName)
             ? ` builder-has-component`
             : ''
-        }`
-        + (options.class ? ' ' + options.class : '')
-        + (Builder.isEditing && this.privateState.state._spacer?.parent === block.id ? ' builder-spacer-parent' : ''),
+        }` +
+        (options.class ? ' ' + options.class : '') +
+        (Builder.isEditing &&
+        this.privateState.state._spacer?.parent === block.id
+          ? ' builder-spacer-parent'
+          : ''),
       key: this.id + index,
       'builder-id': this.id,
       ref: ((ref: any) => (this.ref = ref)) as any,
@@ -419,16 +552,20 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
     ///REACT15ONLY finalOptions.className = finalOptions.class
 
     if (Builder.isIframe) {
-      ;(finalOptions as any)['builder-inline-styles'] = !options.style
+      // TODO: removed bc JS can add styles inline too?
+      ;(finalOptions as any)['builder-inline-styles'] = !(options.attr && options.attr.style)
         ? ''
         : Object.keys(options.style).reduce(
-            (memo, key) => (memo ? `${memo};` : '') + `${cssCase(key)}:${options.style[key]};`,
+            (memo, key) =>
+              (memo ? `${memo};` : '') +
+              `${cssCase(key)}:${options.style[key]};`,
             ''
           )
     }
 
     if (
-      (((finalOptions as any).properties && (finalOptions as any).properties.href) ||
+      (((finalOptions as any).properties &&
+        (finalOptions as any).properties.href) ||
         (finalOptions as any).href) &&
       TagName === 'div'
     ) {
@@ -445,6 +582,10 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
     // )
 
     const children = block.children || finalOptions.children || []
+
+    if (options.attr && typeof options.attr === 'object') {
+      Builder.nextTick(() => this.updateAttrs(options.attr))
+    }
 
     // TODO: test it out
     return (
@@ -480,18 +621,21 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
                       // componet input "attributes"
                       attributes={finalOptions}
                       builderBlock={block}
-                      builderState={this.state}
+                      builderState={this.privateState}
+                      ref={(ref: any) => (this.innerComponentRef = ref)}
                     />
                   ) : (
-                    <TagName {...finalOptions as any}>
+                    <TagName {...(finalOptions as any)}>
                       {InnerComponent && (
-                        <InnerComponent builderState={this.state} builderBlock={block} {...innerComponentProperties} />
+                        <InnerComponent
+                          ref={(ref: any) => (this.innerComponentRef = ref)}
+                          builderState={this.privateState}
+                          builderBlock={block}
+                          {...innerComponentProperties}
+                        />
                       )}
                       {(block as any).text || options.text ? (
-                        // TODO: remove me! No longer in use (maybe with rich text will be back tho)
-                        <TextTag
-                          dangerouslySetInnerHTML={{ __html: options.text || (block as any).text || '' }}
-                        />
+                        options.text
                       ) : !InnerComponent &&
                         children &&
                         Array.isArray(children) &&
@@ -528,7 +672,7 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
     return block.id!
   }
 
-  contents(state: BuilderBlocksState) {
+  contents(state: BuilderBlockState) {
     const { block } = this.props
 
     // this.setState(state);
@@ -543,13 +687,18 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
           .trim()
           .split('.')
       )
-      const itemName = block.repeat.itemName || (collectionName ? collectionName + 'Item' : 'item')
+      const itemName =
+        block.repeat.itemName ||
+        (collectionName ? collectionName + 'Item' : 'item')
       const array = this.stringToFunction(collectionPath)(
         state.state,
         null,
         block,
         api(state),
-        Device
+        Device,
+        null,
+        Builder,
+        this.privateState.context
       )
       if (Array.isArray(array)) {
         return array.map((data, index) => {
@@ -579,8 +728,25 @@ export class BuilderBlock extends React.Component<BuilderBlockProps> {
   }
 
   render() {
+    if (this.state.hasError) {
+      return (
+        <span
+          css={{
+            display: 'inline-block',
+            padding: 5,
+            color: '#999',
+            fontSize: 11,
+            fontStyle: 'italic'
+          }}
+        >
+          Builder block error :( Check console for details
+        </span>
+      )
+    }
     return (
-      <BuilderStoreContext.Consumer>{value => this.contents(value)}</BuilderStoreContext.Consumer>
+      <BuilderStoreContext.Consumer>
+        {value => this.contents(value)}
+      </BuilderStoreContext.Consumer>
     )
   }
 }

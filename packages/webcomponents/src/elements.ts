@@ -15,6 +15,12 @@ if (Builder.isIframe) {
   import('@builder.io/email')
 }
 
+if ((process.env.NODE_ENV as string) === 'development') {
+  // Must use require here as import statements are only allowed
+  // to exist at the top of a file.
+  import('preact/debug' as any)
+}
+
 function onReady(cb: Function) {
   if (document.readyState !== 'loading') {
     cb()
@@ -94,6 +100,9 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
     private trackedClick = false
     data: any
 
+    builderPageRef: any
+    builderRootRef: any
+
     prerender = true
 
     private _options: GetContentOptions = {}
@@ -139,9 +148,7 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
       window.parent.postMessage(
         {
           type: 'builder.isReactSdk',
-          data: {
-            value: true
-          }
+          data: { value: true }
         },
         '*'
       )
@@ -224,9 +231,28 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
       }
 
       const entry = this.getAttribute('entry')
+      const slot = this.getAttribute('slot')
 
       if (!this.prerender || !builder.apiKey || fresh) {
-        this.loadReact(entry ? { id: entry } : null)
+        // if (this.builderPageRef) {
+        //   builder
+        //     .get(name!, {
+        //       key:
+        //         this.getAttribute('key') ||
+        //         (slot ? `slot:${slot}` : null) ||
+        //         (!Builder.isEditing && (this.getAttribute('entry') || name!)) ||
+        //         undefined,
+        //       entry: entry || undefined,
+        //       ...this.options
+        //     })
+        //     .toPromise()
+        //     .then((data: any) => {
+        //       this.builderPageRef.props.content = data
+        //       this.builderPageRef.reload()
+        //     })
+        //   return
+        // }
+        this.loadReact(entry ? { id: entry } : null, fresh)
         return
       }
 
@@ -247,7 +273,6 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
       this.previousName = name
       this.classList.add('builder-loading')
       let unsubscribed = false
-      const slot = this.getAttribute('slot')
 
       const subscription = builder
         .get(name, {
@@ -263,7 +288,7 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
         .subscribe(
           (data: any) => {
             if (unsubscribed) {
-              console.warn('Unsubscribe didnt work!')
+              console.warn('Unsubscribe did not work!')
               return
             }
             this.classList.remove('builder-loading')
@@ -299,7 +324,7 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
       this.subscriptions.push(() => subscription.unsubscribe())
     }
 
-    async loadReact(data?: any) {
+    async loadReact(data?: any, fresh = false) {
       // Hack for now to not load shopstyle on react despite them using the old component format
       if (
         typeof location !== 'undefined' &&
@@ -333,10 +358,12 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
       ) {
         const { BuilderPage } = await getReactPromise
         await Promise.all([getWidgetsPromise, getShopifyPromise as any])
+
         // Ensure styles don't load twice
         BuilderPage.renderInto(
           this,
           {
+            ...({ ref: (ref: any) => (this.builderPageRef = ref) } as any),
             modelName: name!,
             emailMode:
               ((this.options as any) || {}).emailMode ||
@@ -351,7 +378,8 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
                   : this.getAttribute('entry') || name! || undefined)
             }
           },
-          this.getAttribute('hydrate') !== 'false'
+          this.getAttribute('hydrate') !== 'false',
+          fresh
         )
         return
       }
@@ -369,7 +397,7 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
         .subscribe(
           async data => {
             if (unsubscribed) {
-              console.debug('Unsubscribe didnt work!')
+              console.debug("Unsubscribe didn't work!")
               return
             }
 
@@ -387,6 +415,7 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
             BuilderPage.renderInto(
               this,
               {
+                ...({ ref: (ref: any) => (this.builderPageRef = ref) } as any),
                 modelName: name!,
                 emailMode:
                   ((this.options as any) || {}).emailMode ||
@@ -402,7 +431,8 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
                     (Builder.isEditing ? name! : (data && data.id) || undefined)
                 }
               },
-              this.getAttribute('hydrate') !== 'false' // TODO: query param override builder.hydrate
+              this.getAttribute('hydrate') !== 'false', // TODO: query param override builder.hydrate
+              fresh
             )
 
             subscription.unsubscribe()
@@ -430,6 +460,9 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
               BuilderPage.renderInto(
                 this,
                 {
+                  ...({
+                    ref: (ref: any) => (this.builderPageRef = ref)
+                  } as any),
                   modelName: name!,
                   emailMode:
                     ((this.options as any) || {}).emailMode ||
@@ -445,7 +478,8 @@ if (Builder.isBrowser && !customElements.get(componentName)) {
                         ? name!
                         : (data && data.id) || undefined)
                     // TODO: specify variation?
-                  }
+                  },
+                  fresh
                 },
                 this.getAttribute('hydrate') !== 'false'
               )

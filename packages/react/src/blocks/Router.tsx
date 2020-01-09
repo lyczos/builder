@@ -1,7 +1,6 @@
 /** @jsx jsx */
 import { jsx } from '@emotion/core'
 import React from 'react'
-import { BuilderBlock } from '../decorators/builder-block.decorator'
 import { BuilderElement, builder, Builder } from '@builder.io/sdk'
 import { BuilderStoreContext } from '../store/builder-store'
 import { BuilderPage } from '../components/builder-page.component'
@@ -251,6 +250,8 @@ class RouterComponent extends React.Component<RouterProps> {
       <BuilderStoreContext.Consumer>
         {state => {
           this.privateState = state
+          // TODO: useEffect based on this that fetches new data and
+          // populates as content={} param for fast updates
           const url =
             state.state &&
             state.state.location &&

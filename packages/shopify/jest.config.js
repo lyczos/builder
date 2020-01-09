@@ -2,9 +2,11 @@ module.exports = {
   roots: ['<rootDir>/src', '<rootDir>/test'],
   transform: {
     '^.+\\.tsx?$': 'ts-jest',
-    "\\.liquid$": "jest-raw-loader",
+    "^.+\\.[t|j]sx?$": "babel-jest",
+    '\\.liquid$': 'jest-raw-loader',
   },
-  testEnvironment: 'node',
+  watchPathIgnorePatterns: ['json'],
+  testEnvironment: 'jsdom',
   coverageThreshold: {
     global: {
       branches: 70,

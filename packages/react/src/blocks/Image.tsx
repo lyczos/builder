@@ -1,5 +1,5 @@
 /** @jsx jsx */
-import { css, jsx } from '@emotion/core'
+import { jsx } from '@emotion/core'
 import React from 'react'
 
 import { BuilderBlock as BuilderBlockComponent } from '../components/builder-block.component'
@@ -22,8 +22,21 @@ export function updateQueryParam(uri = '', key: string, value: string) {
 
 // TODO: use picture tag to support more formats
 class ImageComponent extends React.Component<any> {
+  get useLazyLoading() {
+    // Use builder.getLocation()
+    return Builder.isBrowser &&
+      location.search.includes('builder.lazyLoadImages=false')
+      ? false
+      : Builder.isBrowser &&
+        location.href.includes('builder.lazyLoadImages=true')
+      ? true
+      : this.props.lazy
+  }
+
+  // TODO: setting to always fade in the images (?)
   state = {
-    load: !this.props.lazy
+    imageLoaded: !this.useLazyLoading,
+    load: !this.useLazyLoading
   }
 
   pictureRef: HTMLPictureElement | null = null
@@ -36,7 +49,7 @@ class ImageComponent extends React.Component<any> {
           if (this.pictureRef) {
             const rect = this.pictureRef.getBoundingClientRect()
             const buffer = window.innerHeight / 2
-            if (rect.top < (window.innerHeight + buffer)) {
+            if (rect.top < window.innerHeight + buffer) {
               this.setState({
                 ...this.state,
                 load: true
@@ -99,65 +112,81 @@ class ImageComponent extends React.Component<any> {
         {value => {
           const amp = value.ampMode
           const Tag: 'img' = amp ? ('amp-img' as any) : 'img'
+
+          const imageContents = (!lazy || this.state.load) && (
+            <Tag
+              {...(amp
+                ? ({
+                    layout: 'responsive',
+                    height:
+                      this.props.height ||
+                      (aspectRatio
+                        ? Math.round(aspectRatio * 1000)
+                        : undefined),
+                    width:
+                      this.props.width ||
+                      (aspectRatio ? Math.round(1000 / aspectRatio) : undefined)
+                  } as any)
+                : null)}
+              alt={this.props.altText}
+              key={
+                Builder.isEditing
+                  ? (typeof this.props.image === 'string' &&
+                      this.props.image.split('?')[0]) ||
+                    undefined
+                  : undefined
+              }
+              role={!this.props.altText ? 'presentation' : undefined}
+              css={{
+                opacity: amp
+                  ? 1
+                  : this.useLazyLoading && !this.state.imageLoaded
+                  ? 0
+                  : 1,
+                transition: 'opacity 0.2s ease-in-out',
+                objectFit: this.props.backgroundSize,
+                objectPosition: this.props.backgroundPosition,
+                ...(aspectRatio && {
+                  position: 'absolute',
+                  height: '100%',
+                  width: '100%',
+                  left: 0,
+                  top: 0
+                }),
+                ...(amp && {
+                  ['& img']: {
+                    objectFit: this.props.backgroundSize,
+                    ObjectPosition: this.props.backgroundPosition
+                  }
+                })
+              }}
+              className="builder-image"
+              src={this.props.image}
+              {...(!amp && {
+                // TODO: queue these so react renders all loads at once
+                onLoad: () => this.setState({ imageLoaded: true })
+              })}
+              // TODO: memoize on image on client
+              srcSet={srcset}
+              sizes={this.props.sizes}
+            />
+          )
+
           return (
             <React.Fragment>
-              <picture ref={ref => (this.pictureRef = ref)}>
-                {srcset && srcset.match(/builder\.io/) && (
-                  <source srcSet={srcset.replace(/\?/g, '?format=webp&')} type="image/webp" />
-                )}
-                {(!lazy || this.state.load) && (
-                  <Tag
-                    {...(amp
-                      ? ({
-                          layout: 'responsive',
-                          height:
-                            this.props.height ||
-                            (aspectRatio ? Math.round(aspectRatio * 1000) : undefined),
-                          width:
-                            this.props.width ||
-                            (aspectRatio ? Math.round(1000 / aspectRatio) : undefined)
-                        } as any)
-                      : null)}
-                    alt={this.props.altText}
-                    key={
-                      Builder.isEditing
-                        ? (typeof this.props.image === 'string' &&
-                            this.props.image.split('?')[0]) ||
-                          undefined
-                        : undefined
-                    }
-                    // height={
-                    //   this.props.height || (aspectRatio ? Math.round(aspectRatio * 1000) : undefined)
-                    // }
-                    // width={
-                    //   this.props.width || (aspectRatio ? Math.round(1000 / aspectRatio) : undefined)
-                    // }
-                    role={!this.props.altText ? 'presentation' : undefined}
-                    css={{
-                      objectFit: this.props.backgroundSize,
-                      objectPosition: this.props.backgroundPosition,
-                      ...(aspectRatio && {
-                        position: 'absolute',
-                        height: '100%',
-                        width: '100%',
-                        left: 0,
-                        top: 0
-                      }),
-                      ...(amp && {
-                        ['& img']: {
-                          objectFit: this.props.backgroundSize,
-                          OObjectPosition: this.props.backgroundPosition
-                        }
-                      })
-                    }}
-                    className="builder-image"
-                    src={this.props.image}
-                    // TODO: memoize on image on client
-                    srcSet={srcset}
-                    sizes={this.props.sizes}
-                  />
-                )}
-              </picture>
+              {amp ? (
+                imageContents
+              ) : (
+                <picture ref={ref => (this.pictureRef = ref)}>
+                  {srcset && srcset.match(/builder\.io/) && (
+                    <source
+                      srcSet={srcset.replace(/\?/g, '?format=webp&')}
+                      type="image/webp"
+                    />
+                  )}
+                  {imageContents}
+                </picture>
+              )}
               {/* TODO: do this with classes like .builder-fit so can reuse csss and not duplicate */}
               {/* TODO: maybe need to add height: auto, widht: auto or so so the image doesn't have a max widht etc */}
               {aspectRatio ? (
@@ -225,7 +254,10 @@ export const Image = withBuilder(ImageComponent, {
       onChange: (options: Map<string, any>) => {
         const DEFAULT_ASPECT_RATIO = 0.7041
         options.delete('srcset')
-        function loadImage(url: string, timeout = 60000): Promise<HTMLImageElement> {
+        function loadImage(
+          url: string,
+          timeout = 60000
+        ): Promise<HTMLImageElement> {
           return new Promise((resolve, reject) => {
             const img = document.createElement('img')
             let loaded = false
@@ -260,7 +292,8 @@ export const Image = withBuilder(ImageComponent, {
             const possiblyUpdatedAspectRatio = options.get('aspectRatio')
             if (
               options.get('image') === value &&
-              (!possiblyUpdatedAspectRatio || possiblyUpdatedAspectRatio === DEFAULT_ASPECT_RATIO)
+              (!possiblyUpdatedAspectRatio ||
+                possiblyUpdatedAspectRatio === DEFAULT_ASPECT_RATIO)
             ) {
               if (img.width && img.height) {
                 options.set('aspectRatio', round(img.height / img.width))
@@ -277,7 +310,11 @@ export const Image = withBuilder(ImageComponent, {
       type: 'text',
       defaultValue: 'cover',
       enum: [
-        { label: 'contain', value: 'contain', helperText: 'The image should never get cropped' },
+        {
+          label: 'contain',
+          value: 'contain',
+          helperText: 'The image should never get cropped'
+        },
         {
           label: 'cover',
           value: 'cover',

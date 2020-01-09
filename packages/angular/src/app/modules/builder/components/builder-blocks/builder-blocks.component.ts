@@ -6,7 +6,7 @@ import {
   OnInit,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { Builder } from '@builder.io/sdk';
+import { Builder, GetContentOptions } from '@builder.io/sdk';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { BuilderService } from '../../services/builder.service';
 
@@ -21,6 +21,9 @@ export class BuilderBlocksComponent implements OnInit {
 
   @Input() child = false;
   @Input() model = '';
+  @Input() key = '';
+
+  @Input() options: GetContentOptions | null = null;
 
   // @deprecated
   @Input() field = '';
@@ -36,22 +39,22 @@ export class BuilderBlocksComponent implements OnInit {
     }
   }
 
-  @HostBinding('class.no-children')
+  // @HostBinding('class.no-children')
   get hasNoChildren() {
     return !(this.blocks && (this.blocks.length || this.blocks.html));
   }
 
-  @HostListener('click')
-  onClick() {
-    if (Builder.isIframe && this.hasNoChildren) {
-      window.parent.postMessage(
-        {
-          type: 'builder.clickEmptyBlocks',
-        },
-        '*'
-      );
-    }
-  }
+  // @HostListener('click')
+  // onClick() {
+  //   if (Builder.isIframe && this.hasNoChildren) {
+  //     window.parent.postMessage(
+  //       {
+  //         type: 'builder.clickEmptyBlocks',
+  //       },
+  //       '*'
+  //     );
+  //   }
+  // }
 
   get arrayBlocks() {
     return Array.isArray(this.blocks);
@@ -70,12 +73,18 @@ export class BuilderBlocksComponent implements OnInit {
   }
 
   get _innerHtml() {
+    const elStr = !Builder.isEditing
+      ? ''
+      : `<builder-component-element prerender="false" ${
+          !this.model ? '' : `name="${this.model}"`
+        }></builder-component-element>`;
+
     if (this.arrayBlocks || !this.blocks) {
-      return '';
+      return elStr;
     }
 
     if (!this.blocks.html) {
-      return '';
+      return elStr;
     }
 
     const css = this.blocks.css;
@@ -84,8 +93,10 @@ export class BuilderBlocksComponent implements OnInit {
       html = `<style class="builder-styles">${css}</style>` + html;
     }
 
-    return `<builder-component-element ${!this.model ? '' : `name="${this.model}"`} ${
-      this.blocks.id ? `entry="${this.blocks.id}"` : ''
+    return `<builder-component-element key="${this.key || this.model}" options='${JSON.stringify(
+      this.options || null // TODO: HTML encode
+    )}' prerender="false" rev="${this.blocks.rev || ''}" ${
+      !this.model ? '' : `name="${this.model}"`
     }>${html as string}</builder-component-element>`;
   }
 
